@@ -25,15 +25,20 @@ class NeDBHandler extends DBInterface {
         this.db = db;
     }
 
-    getDBHandle(guild) {
-        if (!(guild instanceof discordjs.Guild)) { throw 'dbHandle must be passed a guild!'; }
-        let guild_db = this.db.get(guild.id);
-        if (!guild_db) { // if guild doesn't has a database already create one, add the server and return the db of the guild
-            guild_db = new database(({filename: path.resolve(this.folder, 'guilds', guild.id + '.json'), autoload: true}));
-            this.db.set(guild.id, guild_db);
-            this.guilds.insert({id: guild.id, name: guild.name,});
+    getDBHandle(object) {
+        if (object instanceof discordjs.Guild) {
+            let guild_db = this.db.get(guild.id);
+            if (!guild_db) { // if guild doesn't has a database already create one, add the server and return the db of the guild
+                guild_db = new database(({filename: path.resolve(this.folder, 'guilds', guild.id + '.json'), autoload: true}));
+                this.db.set(guild.id, guild_db);
+                this.guilds.insert({id: guild.id, name: guild.name,});
+            }
+            return guild_db;
         }
-        return guild_db;
+        else if (object instanceof discordjs.User) {
+            return this.users;
+        }
+        else { throw 'dbHandle must be passed a guild object or a valid path!'; }
     }
 
     /**
