@@ -7,7 +7,7 @@ class ConfigHandler {
         this.prefix = process.env.DEFAULTPREFIX || '/';
         this.debug = this.parseDebug();
         this.version = process.env.npm_package_version;
-        this._permissions = new Set(['SEND_MESSAGES', 'READ_MESSAGES']);
+        this._permissions = new Set(['SEND_MESSAGES', 'READ_MESSAGES', 'MANAGE_MESSAGES']);
 
         this.validateToken();
     }
