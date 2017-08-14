@@ -5,9 +5,10 @@ const database  = require('nedb');
 let bot;
 let dbs = {};
 
+
 class log_message {
     /**
-     * @description Can eighter take a Discord.Message or an uninitialized Object created from JSON.parse the log.json files
+     * @description Can eighter take a Discord.Message or an previously saved log_message Object (loaded from the database)
      * @param message
      */
     constructor(message) {
@@ -16,6 +17,7 @@ class log_message {
             id      : message.author.id,
             username: message.author.username
         };
+        this.channel = {};
         this.member = {};
         if (message.member && message.author.username !== message.author.nickname && message.member.nickname !== undefined && message.member.nickname !== null) {
             this.member.nickname = ` (${message.member.nickname})`;
@@ -72,13 +74,24 @@ exports.run = async (msg, args) => {
     await msg.delete();
     bot = this.mod.bot;
     let channels = [];
+    dbs = this.mod.dbs;
     if (args.length === 0) {
         channels = [msg.channel];
+    }
+    else if (args[0] === 'all') {
+        for (let [, chan] of msg.guild.channels) {
+            if (chan.type === 'voice' || !(chan.permissionsFor(msg.member).serialize().READ_MESSAGES)) {
+                console.log(`Skipping because voic channel or no read-perms: #${chan.name}; reading-perms: ${chan.permissionsFor(msg.member).serialize.READ_MESSAGES}; channel-type: ${chan.type}`);
+                continue;
+            }
+            // console.log('Queing #' + chan.name + ' up for logging!');
+            channels.push(chan);
+        }
     }
     else {
         for (let [, chan] of msg.mentions.channels) {
             if (chan.type === 'voice') {console.log('#' + chan.name + ' is a voice channel... nothing to log there. Skipping!');}
-            else if (chan.permissionsFor(msg.member).hasPermission('READ_MESSAGES')) {
+            else if (chan.type !== 'voice' && chan.permissionsFor(msg.member).serialize().READ_MESSAGES) {
                 console.log('Queing #' + chan.name + ' up for logging!');
                 channels.push(chan);
             }
@@ -89,10 +102,11 @@ exports.run = async (msg, args) => {
     console.log('Amount of channels to log: ' + channels.length);
     for (let chan of channels) {
         console.log('Logging channel #' + chan.name);
-        let db = _getDB(_getFilesForChannel(chan).json);
+        let chan_handle = _getDB(_getFilesForChannel(chan).json, chan);
+        let db       = chan_handle.db;
         let after_ts = 0;
-        let promise = new Promise(function (resolve) {
-            db.find({}).sort({ createdTimestamp: -1}).limit(1).exec(function (err, tmp_msgs) {
+        let promise  = new Promise(function (resolve) {
+            db.find({}).sort({createdTimestamp: -1}).limit(1).exec(function (err, tmp_msgs) {
                 if (tmp_msgs.length > 0) {
                     after_ts = tmp_msgs[0].createdTimestamp;
                 }
@@ -101,11 +115,21 @@ exports.run = async (msg, args) => {
         });
         promise.then(() => {
             db.find({createdTimestamp: {$gt: after_ts}}).sort({createdTimestamp: 1}).exec((err, msgs) => {
+                dbs[chan.guild.id][chan.name] = {db: db, info: {guild: chan.guild.id, channel: chan.name}};
+                this.mod.dbs = dbs;
                 _writeFile(_getFilesForChannel(chan).md_simple, msgs.map(m => toString(m)).join('\n'));
                 _writeFile(_getFilesForChannel(chan).md, msgs.map(m => toMarkdown(m)).join(''));
             });
         }).catch(console.error);
     }
+
+    // for (let serverid in dbs) {
+    //     if (dbs.hasOwnProperty(serverid)) {
+    //         for (let channelname in dbs[serverid]) {
+    //             console.log('In logging: ' + serverid + ' is ' + dbs[serverid][channelname]);
+    //         }
+    //     }
+    // }
 };
 
 function _loadChannel(channel, resolve, db, before_message_id, after_ts) {
@@ -118,7 +142,7 @@ function _loadChannel(channel, resolve, db, before_message_id, after_ts) {
             }
             if (log_msgs.length < 100) {
                 db.find({}, (err, docs) => {
-                    console.log(`Done logging #${channel.name} (${docs.length} messages in this channel)`);
+                    console.log(`#${channel.name} with ${docs.length} messages`);
                     resolve(docs);
                 })
             }
@@ -149,12 +173,20 @@ function _loadChannelMessages(channel, before_message_id = null) {
                   }).catch(console.error);
 }
 
-function _getDB(file) {
-    if (!dbs[file]) {
-        dbs[file] = new database(({filename: file, autoload: true}));
-        dbs[file].ensureIndex({ fieldName: 'createdTimestamp', unique: true });
+function _getDB(file, channel) {
+    let info;
+    let guild_index = 'dms';
+    if (channel.guild) {
+        info = {guild: channel.guild.name, channel: channel.name};
+        guild_index = channel.guild.id;
     }
-    return dbs[file];
+    else info = {guild: null, channel: channel.name};
+    if (!dbs[guild_index] || !dbs[guild_index][channel.name]) {
+        if (!dbs[guild_index]) dbs[guild_index] = [];
+        dbs[guild_index][channel.name] = {db: new database(({filename: file, autoload: true})), info:info};
+        dbs[guild_index][channel.name].db.ensureIndex({ fieldName: 'createdTimestamp', unique: true });
+    }
+    return dbs[guild_index][channel.name];
 }
 
 function _writeFile(file, string, rewrite = false) {
@@ -196,15 +228,15 @@ function toMarkdown(message) {
 
     let embeds = '';
     for (let emb of message.embeds) {
-        let tmp_string = '  \n> ';
-        if (emb.author != undefined && emb.author != null) {
-            tmp_string += `From: ${emb.author.name} `;
+        let tmp_string = '  \n ';
+        if (emb.author != undefined && emb.author != 'undefined' && emb.author != null) {
+            tmp_string += `>From: ${emb.author.name} `;
         }
         if (emb.footer != undefined && emb.footer != null && emb.footer != '' && emb.footer != undefined) {
-            tmp_string += emb.footer;
+            tmp_string += '>' + emb.footer;
         }
         if (emb.title != undefined && emb.title !== '') {
-            tmp_string += `  \n${emb.title}`;
+            tmp_string += `  \n>${emb.title}`;
             if (emb.title === 'Youtube') {
                 tmp_string += `[![Youtube link](${emb.thumbnail})](${emb.url})`;
                 embeds += tmp_string;
@@ -212,7 +244,7 @@ function toMarkdown(message) {
             }
         }
         if (emb.description != undefined && emb.description !== '') {
-            tmp_string += `  \n${emb.description.split('\n').join('  \n')}`; // markdown requires 2 spaces at the end to recognize newlines...
+            tmp_string += `  \n${emb.description.split('\n').join('  \n>')}`; // markdown requires 2 spaces at the end to recognize newlines and '>' for quotes that contain empty new lines...
         }
         let media = false;
         if (emb.thumbnail != undefined && emb.thumbnail != null && emb.thumbnail !== '') {

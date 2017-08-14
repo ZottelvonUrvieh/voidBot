@@ -1,6 +1,10 @@
 const Module = require('../module-class');
 
 module.exports = class custom extends Module {
+    constructor(handler, id){
+        super(handler, id);
+        this.DBs = {};
+    }
     get config() {
         return {
             name: 'Custom',
@@ -8,11 +12,12 @@ module.exports = class custom extends Module {
             debug: true // This makes it unusable to anyone besides process.env.OWNER
         };
     }
-    getDbs() {
-        return this.dbs;
+    get dbs() {
+        
+        return this.DBs;
     }
-    setDbs(dbs) {
-        this.dbs = dbs;
+    set dbs(dbs) {
+        this.DBs = dbs;
     }
 
 };
